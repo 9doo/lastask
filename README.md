@@ -127,21 +127,148 @@ curl --location 'http://localhost:8080/api/v1/expressions' \
 }
 ```
 
-## Примеры ошибок
+# Примеры запросов и возможных ошибок
 
-- Пользователь уже существует:
-```json
-{"error":"User already exists"}
+## 1. Ошибки аутентификации
+
+### Неправильный пароль при входе
+**Запрос:**
+```bash
+curl -X POST http://localhost:8080/api/v1/login \
+  -H "Content-Type: application/json" \
+  -d '{"login":"user1","password":"wrongpassword"}'
 ```
 
-- Невалидное выражение:
+**Ответ:**
 ```json
-{"error":"expected number at position 2"}
+{
+  "error": "invalid credentials"
+}
 ```
 
-- Деление на ноль:
+### Отсутствие токена при запросе вычисления
+**Запрос:**
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--data '{"expression": "2+2"}'
+```
+
+**Ответ:**
 ```json
-{"error":"division by zero"}
+{
+  "error": "authorization header is required"
+}
+```
+
+## 2. Ошибки валидации выражений
+
+### Недопустимый символ в выражении
+**Запрос:**
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{"expression": "2@2"}'
+```
+
+**Ответ:**
+```json
+{
+  "error": "Invalid token '@' at position 1"
+}
+```
+
+### Неполное выражение
+**Запрос:**
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{"expression": "2+"}'
+```
+
+**Ответ:**
+```json
+{
+  "error": "unexpected end of expression"
+}
+```
+
+### Деление на ноль
+**Запрос:**
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{"expression": "1/0"}'
+```
+
+**Ответ (в логах агента):**
+```
+Worker: error computing task: division by zero
+```
+
+## 3. Ошибки работы с задачами
+
+### Запрос несуществующей задачи
+**Запрос:**
+```bash
+curl --location 'http://localhost:8080/api/v1/expressions/999' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN'
+```
+
+**Ответ:**
+```json
+{
+  "error": "expression not found"
+}
+```
+
+### Неверный формат ID задачи
+**Запрос:**
+```bash
+curl --location 'http://localhost:8080/api/v1/expressions/abc' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN'
+```
+
+**Ответ:**
+```json
+{
+  "error": "invalid expression ID"
+}
+```
+
+## 4. Ошибки регистрации
+
+### Попытка повторной регистрации
+**Запрос:**
+```bash
+curl -X POST http://localhost:8080/api/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"login":"user1","password":"password123"}'
+```
+
+**Ответ (если пользователь уже существует):**
+```json
+{
+  "error": "User already exists"
+}
+```
+
+### Неполные данные при регистрации
+**Запрос (без пароля):**
+```bash
+curl -X POST http://localhost:8080/api/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"login":"newuser"}'
+```
+
+**Ответ:**
+```json
+{
+  "error": "login and password are required"
+}
 ```
 
 ## Тестирование
@@ -164,6 +291,3 @@ go test ./cmd/internal_test.go
 go test ./internal/storage/storage_test.go
 ```
 
-## Контакты
-
-По вопросам обращайтесь: [Telegram](https://t.me/Killered_656)
