@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,12 +14,21 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"calc_service/internal/auth"
+	"calc_service/internal/proto"
 	"calc_service/internal/storage"
 )
 
+type server struct {
+	proto.UnimplementedCalculatorServer
+	o *Orchestrator
+}
+
 type Config struct {
-	Addr                string
+	HTTPAddr            string
+	GRPCAddr            string
 	TimeAddition        int
 	TimeSubtraction     int
 	TimeMultiplications int
@@ -55,9 +65,14 @@ type Task struct {
 }
 
 func Configuration() *Config {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		httpPort = "8080"
+	}
+
+	grpcPort := os.Getenv("GRPC_PORT")
+	if grpcPort == "" {
+		grpcPort = "50051"
 	}
 
 	ta, _ := strconv.Atoi(os.Getenv("TIME_ADDITION_MS"))
@@ -81,12 +96,35 @@ func Configuration() *Config {
 	}
 
 	return &Config{
-		Addr:                port,
+		HTTPAddr:            httpPort,
+		GRPCAddr:            grpcPort,
 		TimeAddition:        ta,
 		TimeSubtraction:     ts,
 		TimeMultiplications: tm,
 		TimeDivisions:       td,
 	}
+}
+
+func (s *server) GetTask(ctx context.Context, req *proto.TaskRequest) (*proto.TaskResponse, error) {
+	task, err := s.o.Storage.GetPendingTask()
+	if err != nil {
+		return nil, err
+	}
+
+	return &proto.TaskResponse{
+		Id:            task.ID,
+		Arg1:          task.Arg1,
+		Arg2:          task.Arg2,
+		Operation:     task.Operation,
+		OperationTime: int32(task.OperationTime),
+	}, nil
+}
+
+func (s *server) SubmitResult(ctx context.Context, req *proto.ResultRequest) (*proto.ResultResponse, error) {
+	if err := s.o.Storage.CompleteTask(req.Id, req.Result); err != nil {
+		return nil, err
+	}
+	return &proto.ResultResponse{Success: true}, nil
 }
 
 func NewOrchestrator() *Orchestrator {
@@ -207,7 +245,9 @@ func (o *Orchestrator) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 func (o *Orchestrator) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/login" || r.URL.Path == "/api/v1/register" {
+		log.Printf("Incoming request to: %s", r.URL.Path)
+
+		if r.URL.Path == "/login" || r.URL.Path == "/register" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -236,6 +276,7 @@ func (o *Orchestrator) authMiddleware(next http.Handler) http.Handler {
 }
 
 func (o *Orchestrator) calculateHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("Received calculate request")
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok {
 		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
@@ -293,18 +334,21 @@ func (o *Orchestrator) expressionsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	exprs := make([]*Expression, len(dbExprs))
-	for i, dbExpr := range dbExprs {
-		exprs[i] = &Expression{
-			ID:     strconv.Itoa(dbExpr.ID),
-			Expr:   dbExpr.Expression,
-			Status: dbExpr.Status,
-			Result: dbExpr.Result,
+	response := make([]map[string]interface{}, len(dbExprs))
+	for i, expr := range dbExprs {
+		item := map[string]interface{}{
+			"id":         strconv.Itoa(expr.ID),
+			"expression": expr.Expression,
+			"status":     expr.Status,
 		}
+		if expr.Result != nil {
+			item["result"] = *expr.Result
+		}
+		response[i] = item
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"expressions": exprs})
+	json.NewEncoder(w).Encode(map[string]interface{}{"expressions": response})
 }
 
 func (o *Orchestrator) expressionIDHandler(w http.ResponseWriter, r *http.Request) {
@@ -319,7 +363,13 @@ func (o *Orchestrator) expressionIDHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	idStr := r.URL.Path[len("/api/v1/expressions/"):]
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 2 {
+		http.Error(w, `{"error":"Invalid expression ID"}`, http.StatusBadRequest)
+		return
+	}
+	idStr := pathParts[len(pathParts)-1]
+
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, `{"error":"Invalid expression ID"}`, http.StatusBadRequest)
@@ -336,15 +386,17 @@ func (o *Orchestrator) expressionIDHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	expr := &Expression{
-		ID:     idStr,
-		Expr:   dbExpr.Expression,
-		Status: dbExpr.Status,
-		Result: dbExpr.Result,
+	response := map[string]interface{}{
+		"id":         idStr,
+		"expression": dbExpr.Expression,
+		"status":     dbExpr.Status,
+	}
+	if dbExpr.Result != nil {
+		response["result"] = *dbExpr.Result
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"expression": expr})
+	json.NewEncoder(w).Encode(map[string]interface{}{"expression": response})
 }
 
 func (o *Orchestrator) getTaskHandler(w http.ResponseWriter, r *http.Request) {
@@ -383,69 +435,125 @@ func (o *Orchestrator) postTaskHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *Orchestrator) Tasks(expr *Expression) {
-	var traverse func(node *ASTNode)
-	traverse = func(node *ASTNode) {
-		if node == nil || node.IsLeaf {
+	log.Printf("Creating tasks for expression %s", expr.ID)
+	exprID, _ := strconv.Atoi(expr.ID)
+
+	var stack []*ASTNode
+	var tasks []*Task
+
+	var postOrder func(node *ASTNode)
+	postOrder = func(node *ASTNode) {
+		if node == nil {
 			return
 		}
 
-		traverse(node.Left)
-		traverse(node.Right)
-		if node.Left != nil && node.Right != nil && node.Left.IsLeaf && node.Right.IsLeaf {
-			if !node.TaskScheduled {
-				o.taskCounter++
-				taskID := fmt.Sprintf("%d", o.taskCounter)
-				var opTime int
-				switch node.Operator {
-				case "+":
-					opTime = o.Config.TimeAddition
-				case "-":
-					opTime = o.Config.TimeSubtraction
-				case "*":
-					opTime = o.Config.TimeMultiplications
-				case "/":
-					opTime = o.Config.TimeDivisions
-				default:
-					opTime = 100
-				}
+		postOrder(node.Left)
+		postOrder(node.Right)
 
-				task := &Task{
-					ID:            taskID,
-					ExprID:        expr.ID,
-					Arg1:          node.Left.Value,
-					Arg2:          node.Right.Value,
-					Operation:     node.Operator,
-					OperationTime: opTime,
-					Node:          node,
-				}
-				node.TaskScheduled = true
-				o.taskStore[taskID] = task
-				o.taskQueue = append(o.taskQueue, task)
+		if !node.IsLeaf {
+			if len(stack) < 2 {
+				log.Printf("Not enough operands for operation %s", node.Operator)
+				return
 			}
+
+			right := stack[len(stack)-1]
+			left := stack[len(stack)-2]
+			stack = stack[:len(stack)-2]
+
+			o.taskCounter++
+			taskID := fmt.Sprintf("%d", o.taskCounter)
+
+			var opTime int
+			switch node.Operator {
+			case "+":
+				opTime = o.Config.TimeAddition
+			case "-":
+				opTime = o.Config.TimeSubtraction
+			case "*":
+				opTime = o.Config.TimeMultiplications
+			case "/":
+				opTime = o.Config.TimeDivisions
+			default:
+				opTime = 100
+			}
+
+			task := &Task{
+				ID:            taskID,
+				ExprID:        expr.ID,
+				Arg1:          left.Value,
+				Arg2:          right.Value,
+				Operation:     node.Operator,
+				OperationTime: opTime,
+				Node:          node,
+			}
+
+			tasks = append(tasks, task)
+
+			resultNode := &ASTNode{
+				IsLeaf: true,
+				Value:  0,
+			}
+			stack = append(stack, resultNode)
+		} else {
+			stack = append(stack, node)
 		}
 	}
-	traverse(expr.AST)
+
+	postOrder(expr.AST)
+
+	for _, task := range tasks {
+		if err := o.Storage.CreateTask(&storage.Task{
+			ID:            task.ID,
+			ExprID:        exprID,
+			Arg1:          task.Arg1,
+			Arg2:          task.Arg2,
+			Operation:     task.Operation,
+			OperationTime: task.OperationTime,
+		}); err != nil {
+			log.Printf("Failed to create task: %v", err)
+			continue
+		}
+		o.taskStore[task.ID] = task
+		o.taskQueue = append(o.taskQueue, task)
+		log.Printf("Created task %s: %.2f %s %.2f",
+			task.ID, task.Arg1, task.Operation, task.Arg2)
+	}
 }
 
 func (o *Orchestrator) RunServer() error {
+	lis, err := net.Listen("tcp", ":"+o.Config.GRPCAddr)
+	if err != nil {
+		return fmt.Errorf("failed to listen: %v", err)
+	}
+
+	grpcServer := grpc.NewServer()
+	proto.RegisterCalculatorServer(grpcServer, &server{o: o})
+
+	go func() {
+		log.Printf("Starting gRPC server on port %s", o.Config.GRPCAddr)
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("failed to serve: %v", err)
+		}
+	}()
+
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/api/v1/register", o.registerHandler)
 	mux.HandleFunc("/api/v1/login", o.loginHandler)
+	mux.HandleFunc("/api/v1/register", o.registerHandler)
 
 	protected := http.NewServeMux()
-	protected.HandleFunc("/api/v1/calculate", o.calculateHandler)
-	protected.HandleFunc("/api/v1/expressions", o.expressionsHandler)
-	protected.HandleFunc("/api/v1/expressions/", o.expressionIDHandler)
+	protected.HandleFunc("/calculate", o.calculateHandler)
+	protected.HandleFunc("/expressions", o.expressionsHandler)
+	protected.HandleFunc("/expressions/", o.expressionIDHandler)
 	protected.HandleFunc("/internal/task", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			o.getTaskHandler(w, r)
 		} else if r.Method == http.MethodPost {
 			o.postTaskHandler(w, r)
-		} else {
-			http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	})
+
+	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", o.authMiddleware(protected)))
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"API Not Found"}`, http.StatusNotFound)
@@ -461,5 +569,7 @@ func (o *Orchestrator) RunServer() error {
 			o.mu.Unlock()
 		}
 	}()
-	return http.ListenAndServe(":"+o.Config.Addr, mux)
+
+	log.Printf("Starting HTTP server on port %s", o.Config.HTTPAddr)
+	return http.ListenAndServe(":"+o.Config.HTTPAddr, mux)
 }
