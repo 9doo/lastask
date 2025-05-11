@@ -1,48 +1,51 @@
-# Калькулятор выражений с асинхронной обработкой
+# � Expression Calculator Service
 
-Этот проект представляет собой веб-сервис для вычисления математических выражений с возможностью регистрации пользователей и хранением истории вычислений.
+![Go](https://img.shields.io/badge/Go-1.16+-blue)
+![SQLite](https://img.shields.io/badge/SQLite-3-lightgrey)
+![Node.js](https://img.shields.io/badge/Node.js-18+-green)
 
-## Особенности
+Веб-сервис для вычисления математических выражений с аутентификацией пользователей и хранением истории вычислений.
 
-- Асинхронная обработка выражений с использованием архитектуры Orchestrator-Agent
-- Аутентификация пользователей (JWT)
-- Хранение истории вычислений
-- Валидация входных выражений
-- Фронтенд на React/Vite
+## 🛠 Требования
 
-## Технологический стек
+Перед началом работы убедитесь, что у вас установлено:
 
-**Бэкенд:**
-- Go (1.16+)
+- Go (версия 1.16 или выше)
 - SQLite3
-- gRPC
+- GCC компилятор (для CGO)
+- Node.js (для фронтенда)
 
-**Фронтенд:**
-- React
-- Vite
-- Node.js
+### Установка зависимостей
 
-## Установка и запуск
+**Windows:**
+```powershell
+winget install --id=SQLite.SQLite -e
+```
 
-### Предварительные требования
+**Linux/macOS:**
+```bash
+# Для SQLite (если не установлен)
+sudo apt-get install sqlite3 libsqlite3-dev
+```
 
-1. Установите [Go](https://golang.org/dl/) (версия 1.16 или выше)
-2. Установите [SQLite3](https://www.sqlite.org/download.html)
-3. Убедитесь, что CGO включен (`export CGO_ENABLED=1`)
-4. Установите GCC компилятор
-5. Для фронтенда установите [Node.js](https://nodejs.org/en/download)
-
-### Запуск сервиса
+## ⚙️ Установка
 
 1. Клонируйте репозиторий:
-
 ```bash
-git clone https://github.com/Killered672/LastModule
+git clone https://github.com/9doo/lastask
 cd LastModule
 ```
 
-2. Запустите Orchestrator:
+2. Включите CGO (если выключен):
+```bash
+export CGO_ENABLED=1
+```
 
+## 🚀 Запуск
+
+### 1. Запуск Orchestrator
+
+В первом терминале:
 ```bash
 export ORCHESTRATOR_URL=localhost:50051
 export TIME_ADDITION_MS=200
@@ -53,45 +56,57 @@ export TIME_DIVISIONS_MS=400
 go run cmd/orchestrator.start/main.go
 ```
 
-3. В новом терминале запустите Agent:
+Ожидаемый вывод:
+```
+Starting Orchestrator on port 8080
+Starting gRPC server on port 50051
+Starting HTTP server on port 8080
+```
 
+### 2. Запуск Agent
+
+Во втором терминале:
 ```bash
+cd LastModule
 export COMPUTING_POWER=4
 export ORCHESTRATOR_URL=localhost:50051
 
 go run cmd/agent.start/main.go
 ```
 
-4. (Опционально) Запустите фронтенд:
-
-```bash
-cd frontend
-npm install
-npm run dev
+Ожидаемый вывод:
+```
+Starting Agent...
+Starting worker 0
+Starting worker 1
+Starting worker 2
+Starting worker 3
+Worker X: error getting task: rpc error: code = Unknown desc = not found
 ```
 
-Фронтенд будет доступен по адресу: http://localhost:5173
+*Примечание: Ошибки "not found" нормальны при отсутствии активных задач.*
 
-## Использование API
+## 🔐 Аутентификация
 
 ### Регистрация пользователя
-
 ```bash
 curl -X POST http://localhost:8080/api/v1/register \
   -H "Content-Type: application/json" \
   -d '{"login":"user1","password":"password123"}'
 ```
 
-### Аутентификация
-
+### Вход пользователя
 ```bash
 curl -X POST http://localhost:8080/api/v1/login \
   -H "Content-Type: application/json" \
   -d '{"login":"user1","password":"password123"}'
 ```
 
-### Отправка выражения на вычисление
+*Сохраните полученный JWT токен для последующих запросов.*
 
+## 🧮 Использование API
+
+### Отправка выражения на вычисление
 ```bash
 curl --location 'http://localhost:8080/api/v1/calculate' \
 --header 'Content-Type: application/json' \
@@ -101,19 +116,16 @@ curl --location 'http://localhost:8080/api/v1/calculate' \
 
 Ответ:
 ```json
-{
-  "id": "task-id"
-}
+{"id": "..."}
 ```
 
-### Проверка статуса выражения
-
+### Проверка статуса вычислений
 ```bash
 curl --location 'http://localhost:8080/api/v1/expressions' \
 --header 'Authorization: Bearer YOUR_JWT_TOKEN'
 ```
 
-Ответ:
+Пример ответа:
 ```json
 {
   "expressions": [
@@ -127,167 +139,176 @@ curl --location 'http://localhost:8080/api/v1/expressions' \
 }
 ```
 
-# Примеры запросов и возможных ошибок
+## 💻 Фронтенд
 
-## 1. Ошибки аутентификации
-
-### Неправильный пароль при входе
-**Запрос:**
+1. Перейдите в папку фронтенда:
 ```bash
-curl -X POST http://localhost:8080/api/v1/login \
-  -H "Content-Type: application/json" \
-  -d '{"login":"user1","password":"wrongpassword"}'
+cd lastmodule/frontend
 ```
 
-**Ответ:**
-```json
-{
-  "error": "invalid credentials"
-}
-```
-
-### Отсутствие токена при запросе вычисления
-**Запрос:**
+2. Установите зависимости и запустите:
 ```bash
-curl --location 'http://localhost:8080/api/v1/calculate' \
---header 'Content-Type: application/json' \
---data '{"expression": "2+2"}'
+npm install
+npm run dev
 ```
 
-**Ответ:**
-```json
-{
-  "error": "authorization header is required"
-}
-```
+Фронтенд будет доступен по адресу: [http://localhost:5173](http://localhost:5173)
 
-## 2. Ошибки валидации выражений
+*Примечание: Бекенд должен быть запущен для работы фронтенда.*
 
-### Недопустимый символ в выражении
-**Запрос:**
-```bash
-curl --location 'http://localhost:8080/api/v1/calculate' \
---header 'Content-Type: application/json' \
---header 'Authorization: Bearer YOUR_JWT_TOKEN' \
---data '{"expression": "2@2"}'
-```
+## ❌ Ошибки
 
-**Ответ:**
-```json
-{
-  "error": "Invalid token '@' at position 1"
-}
-```
+### 1. Ошибка регистрации (409 Conflict)
+**Когда возникает**: При попытке зарегистрировать пользователя, который уже существует
 
-### Неполное выражение
-**Запрос:**
-```bash
-curl --location 'http://localhost:8080/api/v1/calculate' \
---header 'Content-Type: application/json' \
---header 'Authorization: Bearer YOUR_JWT_TOKEN' \
---data '{"expression": "2+"}'
-```
-
-**Ответ:**
-```json
-{
-  "error": "unexpected end of expression"
-}
-```
-
-### Деление на ноль
-**Запрос:**
-```bash
-curl --location 'http://localhost:8080/api/v1/calculate' \
---header 'Content-Type: application/json' \
---header 'Authorization: Bearer YOUR_JWT_TOKEN' \
---data '{"expression": "1/0"}'
-```
-
-**Ответ (в логах агента):**
-```
-Worker: error computing task: division by zero
-```
-
-## 3. Ошибки работы с задачами
-
-### Запрос несуществующей задачи
-**Запрос:**
-```bash
-curl --location 'http://localhost:8080/api/v1/expressions/999' \
---header 'Authorization: Bearer YOUR_JWT_TOKEN'
-```
-
-**Ответ:**
-```json
-{
-  "error": "expression not found"
-}
-```
-
-### Неверный формат ID задачи
-**Запрос:**
-```bash
-curl --location 'http://localhost:8080/api/v1/expressions/abc' \
---header 'Authorization: Bearer YOUR_JWT_TOKEN'
-```
-
-**Ответ:**
-```json
-{
-  "error": "invalid expression ID"
-}
-```
-
-## 4. Ошибки регистрации
-
-### Попытка повторной регистрации
-**Запрос:**
+**Пример запроса**:
 ```bash
 curl -X POST http://localhost:8080/api/v1/register \
   -H "Content-Type: application/json" \
   -d '{"login":"user1","password":"password123"}'
 ```
 
-**Ответ (если пользователь уже существует):**
+**Ответ**:
 ```json
 {
   "error": "User already exists"
 }
 ```
 
-### Неполные данные при регистрации
-**Запрос (без пароля):**
+### 2. Ошибка 404 (Not Found)
+**Когда возникает**: При обращении к несуществующему endpoint
+
+**Пример запроса**:
 ```bash
-curl -X POST http://localhost:8080/api/v1/register \
-  -H "Content-Type: application/json" \
-  -d '{"login":"newuser"}'
+curl --location 'http://localhost:8080/api/v1/nonexistent'
 ```
 
-**Ответ:**
+**Ответ**:
 ```json
 {
-  "error": "login and password are required"
+  "error": "API Not Found"
 }
 ```
 
-## Тестирование
+### 3. Ошибка валидации выражения (422 Unprocessable Entity)
+**Когда возникает**: При отправке выражения с синтаксической ошибкой
 
-Для запуска тестов:
+**Пример запроса**:
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{"expression": "2+a"}'
+```
 
+**Ответ**:
+```json
+{
+  "error": "expected number at position 2"
+}
+```
+
+### 4. Ошибка недопустимого токена (400 Bad Request)
+**Когда возникает**: При отправке выражения с недопустимыми символами
+
+**Пример запроса**:
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{"expression": "2\0"}'
+```
+
+**Ответ**:
+```json
+{
+  "error": "Invalid token"
+}
+```
+
+### 5. Ошибка деления на ноль (500 Internal Server Error)
+**Когда возникает**: При попытке выполнить деление на ноль
+
+**Пример запроса**:
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{"expression": "2/0"}'
+```
+
+**Ответ в логах агента**:
+```
+Worker: error computing task: division by zero
+```
+
+**Ответ API**:
+```json
+{
+  "id": "task-id-123"
+}
+```
+
+### 6. Ошибка аутентификации (401 Unauthorized)
+**Когда возникает**: При запросе без токена или с невалидным токеном
+
+**Пример запроса**:
+```bash
+curl --location 'http://localhost:8080/api/v1/expressions'
+```
+
+**Ответ**:
+```json
+{
+  "error": "Authorization header is required"
+}
+```
+
+### 7. Ошибка неверных учетных данных (401 Unauthorized)
+**Когда возникает**: При вводе неверного логина/пароля
+
+**Пример запроса**:
+```bash
+curl -X POST http://localhost:8080/api/v1/login \
+  -H "Content-Type: application/json" \
+  -d '{"login":"wrong","password":"wrong"}'
+```
+
+**Ответ**:
+```json
+{
+  "error": "Invalid credentials"
+}
+```
+## 🧪 Тестирование
+
+Запуск unit-тестов:
 ```bash
 go test ./internal/agent/agent_calculation_test.go
 ```
 
-Или интеграционные тесты:
-
+Интеграционные тесты:
 ```bash
 go test ./cmd/internal_test.go
 ```
 
 Тесты хранилища:
-
 ```bash
 go test ./internal/storage/storage_test.go
 ```
 
+Успешный вывод:
+```
+ok   calc_service/internal/evaluator 0.001s
+```
+
+## 📌 Примеры
+
+### Успешный запрос
+```bash
+curl --location 'http://localhost:8080/api/v1/calculate' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer YOUR_JWT_TOKEN' \
+--data '{"expression": "2+2*2"}'
+```
+*Примечание: В тестах агента может возникать конфликт с ErrDivisionByZero из-за дублирования в коде.*
