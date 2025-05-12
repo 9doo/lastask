@@ -67,7 +67,7 @@ Starting HTTP server on port 8080
 
 Во втором терминале:
 ```bash
-cd LastModule
+cd lastask
 export COMPUTING_POWER=4
 export ORCHESTRATOR_URL=localhost:50051
 
@@ -143,7 +143,7 @@ curl --location 'http://localhost:8080/api/v1/expressions' \
 
 1. Перейдите в папку фронтенда:
 ```bash
-cd lastmodule/frontend
+cd lastask/frontend
 ```
 
 2. Установите зависимости и запустите:
