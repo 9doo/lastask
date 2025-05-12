@@ -33,7 +33,7 @@ sudo apt-get install sqlite3 libsqlite3-dev
 1. Клонируйте репозиторий:
 ```bash
 git clone https://github.com/9doo/lastask
-cd LastModule
+cd lastask
 ```
 
 2. Включите CGO (если выключен):
